@@ -77,9 +77,26 @@ export const defaultCredsProvider: CredsProvider = (env) => {
   return { userName: field('username'), password: field('password') };
 };
 
-/** Default 1Password-backed TOTP provider. */
-export const defaultTotpProvider: TotpProvider = (env) => {
+const TOTP_STEP_MS = 30_000;
+/** Minimum life a code needs left to survive the POST round trip. */
+const TOTP_MIN_REMAINING_MS = 8_000;
+
+/** Ms to wait so the next code read is not about to roll over, or 0. */
+export function msUntilSafeTotp(nowMs: number): number {
+  const remaining = TOTP_STEP_MS - (nowMs % TOTP_STEP_MS);
+  return remaining < TOTP_MIN_REMAINING_MS ? remaining + 500 : 0;
+}
+
+/**
+ * Default 1Password-backed TOTP provider. The xplor backend verifies with
+ * otplib's default window (current step only), so a code read in the last
+ * seconds of its step is rejected as "Incorrect verification code" once the
+ * request lands after rollover. Wait for a fresh step instead.
+ */
+export const defaultTotpProvider: TotpProvider = async (env) => {
   const item = requireOpItem(env);
+  const waitMs = msUntilSafeTotp(Date.now());
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
   return op(['item', 'get', item.item, '--vault', item.vault, '--otp']);
 };
 
@@ -117,7 +134,7 @@ async function postJson(
     data = text;
   }
   if (res.status >= 500) {
-    throw new TokenError(`auth endpoint returned ${res.status}`);
+    throw new TokenError(`auth endpoint ${url} returned ${res.status} — backend is down or unreachable, not a credentials problem`);
   }
   return data;
 }
