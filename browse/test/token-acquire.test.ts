@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import * as path from 'path';
 
-import { acquireToken, decodeJwtExpMs } from '../src/token-manager';
+import { acquireToken, decodeJwtExpMs, msUntilSafeTotp } from '../src/token-manager';
 import { validateAdapter, type FrontendAdapter } from '../src/frontend-adapter';
 
 const XPLOR_CONFIG = path.join(
@@ -121,5 +121,18 @@ describe('U1 decodeJwtExpMs', () => {
   });
   it('returns null for a non-JWT string', () => {
     expect(decodeJwtExpMs('not-a-jwt')).toBeNull();
+  });
+});
+
+describe('msUntilSafeTotp', () => {
+  it('reads immediately when the current step has time left', () => {
+    expect(msUntilSafeTotp(30_000 * 100 + 5_000)).toBe(0);
+  });
+
+  it('waits past rollover when the current step is nearly spent', () => {
+    const now = 30_000 * 100 + 27_000;
+    const waitMs = msUntilSafeTotp(now);
+    expect(waitMs).toBe(3_500);
+    expect((now + waitMs) % 30_000).toBeLessThan(1_000);
   });
 });
